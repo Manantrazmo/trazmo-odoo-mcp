@@ -173,8 +173,19 @@ def test_fewer_than_three_people_not_disclosed(client, fake):
                   {"id": 2, "name": "Solo Person", "is_company": False, "parent_id": False}],
                  [{"partner_id": [1, "Co"], "balance": 100}, {"partner_id": [2, "Solo Person"], "balance": 40}])
     vendors = {v["vendor"]: v["amount"] for v in r["by_vendor"]}
-    assert vendors == {"Co": 100.0, "Other vendors": 40.0}
+    assert vendors == {"Co": 100.0}  # a lone person's amount must not appear anywhere
+    assert 40.0 not in [v["amount"] for v in r["by_vendor"]] and "vendor_note" in r
     assert "Solo Person" not in str(r) and "people" not in str(r)
+
+
+def test_small_group_merged_only_with_enough_other_contributors(client, fake):
+    companies = [{"id": i, "name": f"Co{i}", "is_company": True, "parent_id": False} for i in range(10, 20)]
+    solo = {"id": 2, "name": "Solo Person", "is_company": False, "parent_id": False}
+    r = _expense(client, fake, companies + [solo],
+                 [{"partner_id": [c["id"], c["name"]], "balance": 100 - c["id"]} for c in companies]
+                 + [{"partner_id": [2, "Solo Person"], "balance": 40}])
+    other = [v for v in r["by_vendor"] if v["vendor"] == "Other vendors"][0]
+    assert other["amount"] != 40.0 and "vendor_note" not in r  # 2 companies + 1 person merged, not isolated
 
 
 def test_three_people_aggregated(client, fake):

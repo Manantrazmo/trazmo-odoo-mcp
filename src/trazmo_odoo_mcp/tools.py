@@ -247,18 +247,27 @@ def expense_breakdown(c: OdooClient, company_id: int, today: date, months: int =
             vendors[p["key"]] = (p["name"], vendors.get(p["key"], (None, 0.0))[1] + amt)
     ranked = sorted(vendors.values(), key=lambda kv: abs(kv[1]), reverse=True)
     out = [{"vendor": n, "amount": r2(v)} for n, v in ranked[:8]]
-    other = sum(v for _, v in ranked[8:])
-    if 0 < len(people) < MIN_PEOPLE_GROUP:  # too few to aggregate safely: fold into "Other vendors"
-        other, people_total, people = other + people_total, 0.0, set()
-        out.append({"vendor": "Other vendors", "amount": r2(other)})
-    elif len(ranked) > 8:
+    other, other_count = sum(v for _, v in ranked[8:]), max(0, len(ranked) - 8)
+    withheld = False
+    if 0 < len(people) < MIN_PEOPLE_GROUP:  # too few people to aggregate safely
+        other, other_count = other + people_total, other_count + len(people)
+        people, people_total = set(), 0.0
+        # Only show the merged line if it can't isolate a person: needs >= K contributors,
+        # or contain no person at all (the else case below).
+        if other_count >= MIN_PEOPLE_GROUP:
+            out.append({"vendor": "Other vendors", "amount": r2(other)})
+        else:
+            withheld = True
+    elif other_count:
         out.append({"vendor": "Other vendors", "amount": r2(other)})
     if people:
         out.append({"vendor": STAFF_LABEL.format(n=len(people)), "amount": r2(people_total)})
     if no_partner:
         out.append({"vendor": "(No partner on entry)", "amount": r2(no_partner)})
     return {"company": co, "currency": co["currency"], "from": start.isoformat(), "to": today.isoformat(),
-            "total": r2(sum(v for _, v in items)), "by_account": accounts, "by_vendor": out}
+            "total": r2(sum(v for _, v in items)), "by_account": accounts, "by_vendor": out,
+            **({"vendor_note": "Small individual amounts withheld to avoid identifying a person; "
+                               "by_vendor does not sum to total."} if withheld else {})}
 
 
 # ---- 7-12 ------------------------------------------------------------------
