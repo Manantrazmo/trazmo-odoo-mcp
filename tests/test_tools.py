@@ -192,3 +192,49 @@ def test_three_people_aggregated(client, fake):
     people = [{"id": i, "name": f"P{i}", "is_company": False, "parent_id": False} for i in (2, 3, 4)]
     r = _expense(client, fake, people, [{"partner_id": [i, f"P{i}"], "balance": 10} for i in (2, 3, 4)])
     assert r["by_vendor"] == [{"vendor": "Staff & individual reimbursements (3 people, aggregated)", "amount": 30.0}]
+
+
+def test_lead_funnel(client, fake):
+    counts = {"probability=100": 4, "type": 30}
+    def sc(model, method, a, kw):
+        d = a[0]
+        if ("probability", "=", 100) in d: return 4
+        if ("type", "=", "opportunity") in d: return 30
+        if ("active", "=", False) in d and ("probability", "=", 0) in d: return 11
+        if ("probability", "<", 100) in d: return 25
+        return 100
+    fake.on(M("crm.lead", "search_count"), sc)
+    fake.on(gb("crm.lead", "stage_id"), [{"stage_id": [1, "New"], "__count": 20, "expected_revenue": 500}])
+    fake.on(gb("crm.lead", "lost_reason_id"), [{"lost_reason_id": [1, "Price"], "__count": 3},
+                                               {"lost_reason_id": False, "__count": 8}])
+    r = T.lead_funnel(client, 2, TODAY, days=30)
+    assert (r["created"], r["qualified"], r["open"], r["won"], r["lost"]) == (100, 30, 25, 4, 11)
+    assert r["win_pct"] == 4.0 and r["qualified_pct"] == 30.0 and r["since"] == "2026-10-10"
+    assert r["top_lost_reasons"][0] == {"reason": "Unspecified", "count": 8}
+    # archived (lost) leads are included explicitly, window and company applied
+    d = fake.calls[0][2][0]
+    assert ("active", "in", [True, False]) in d and ("create_date", ">=", "2026-10-10") in d and ("company_id", "=", 2) in d
+    assert T.lead_funnel(client, 2, TODAY, days=99999)["window_days"] == 365
+
+
+def test_leads_by_source(client, fake):
+    fake.on(gb("crm.lead", "source_id"), lambda m, meth, a, kw: (
+        [{"source_id": [1, "Website"], "__count": 3}] if ("probability", "=", 100) in a[0]
+        else [{"source_id": [1, "Website"], "__count": 12}, {"source_id": [2, "Referral"], "__count": 4}]))
+    fake.on(gb("crm.lead", "medium_id"), [{"medium_id": False, "__count": 5}])
+    fake.on(gb("crm.lead", "campaign_id"), [])
+    r = T.leads_by_source(client, 2, TODAY)
+    assert r["by_source"][0] == {"name": "Website", "count": 12, "won": 3, "win_pct": 25.0}
+    assert r["by_source"][1]["won"] == 0 and r["by_medium"][0]["name"] == "(none)"
+
+
+def test_lead_response_time(client, fake):
+    fake.on(gb("crm.lead", "company_id"), [{"company_id": [2, "x"], "__count": 9, "day_open": 1.256}])
+    fake.on(M("crm.lead", "search_count"), lambda m, meth, a, kw: 2 if ("create_date", "<", "2026-11-07") in a[0] else 6)
+    r = T.lead_response_time(client, 2, TODAY)
+    assert r["avg_days_to_assign"] == 1.26 and r["open_unassigned"] == 6 and r["open_unassigned_older_than_2_days"] == 2
+
+
+def test_lead_tools_never_read_contact_fields():
+    from trazmo_odoo_mcp.odoo import MODELS
+    assert not {"email_from", "phone", "mobile", "contact_name", "partner_name", "description", "name"} & MODELS["crm.lead"].fields

@@ -13,7 +13,7 @@ Replaces an Odoo API key pasted into a scheduled-task prompt: the prompt holds n
 - Real security boundary for Odoo data is the **Odoo user's own access rights**. Make it a dedicated read-only user (no write ACLs on anything) and grant it all three companies.
 
 ## Tools (all take `company_id`: 1 Trazmo Pvt Ltd PKR, 2 Trazmo Holdings USD, 3 Tamkeen Financial PKR)
-`list_companies`, `get_invoice_summary`, `get_cash_positions`, `get_cash_flow_by_month(months=6)`, `get_ytd_mtd`, `get_expense_breakdown(months=6)`, `get_crm_summary`, `get_sales_summary`, `get_hr_summary`, `get_project_summary`, `get_loan_summary`, `get_mailings`, `get_social`.
+`list_companies`, `get_invoice_summary`, `get_cash_positions`, `get_cash_flow_by_month(months=6)`, `get_ytd_mtd`, `get_expense_breakdown(months=6)`, `get_crm_summary`, `get_sales_summary`, `get_hr_summary`, `get_project_summary`, `get_loan_summary`, `get_mailings`, `get_social`, `get_lead_funnel`, `get_leads_by_source`, `get_lead_response_time` (no contact details are ever read; response time is created→assigned, since Odoo stores no first-contact time). `get_mailings`/`get_social` are group-wide, so only logins with all companies can call them.
 `mailing.mailing` and `social.post` have no company field in Odoo, so those two are group level (`company_scoped: false`). Dates use `REPORT_TZ` (default Asia/Karachi). Results include `"truncated": true` if any query hit the 500-row cap.
 
 ## Develop & test
@@ -41,7 +41,7 @@ ODOO_LOGIN=<readonly-user-login> ./deploy.sh
 `deploy.sh` enables APIs, creates the service account, bootstraps a minimal smoke-test login (token held in a variable, never printed), grants per-secret access, deploys, then smoke-tests healthz / 401 / 200 / tools count / write rejection.
 
 ## Logins (scheduled task, leadership, directors, HR)
-Tool groups: `finance`, `crm`, `hr`, `ops` (or individual tool names, or `*`). Companies: ids or `*`.
+Tool groups: `finance`, `crm`, `leads`, `hr`, `ops` (or individual tool names, or `*`). Companies: ids or `*`.
 ```bash
 PYTHONPATH=src python3 -m trazmo_odoo_mcp.principals_cli add scheduled-task --tools finance,crm,ops --companies '*' --project <PROJECT_ID>
 PYTHONPATH=src python3 -m trazmo_odoo_mcp.principals_cli add director-tamkeen --tools finance --companies 3 --project <PROJECT_ID>

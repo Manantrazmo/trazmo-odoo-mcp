@@ -18,10 +18,13 @@ TOOL_GROUPS = {
     "finance": ["get_invoice_summary", "get_cash_positions", "get_cash_flow_by_month", "get_ytd_mtd",
                 "get_expense_breakdown"],
     "crm": ["get_crm_summary", "get_sales_summary"],
+    "leads": ["get_lead_funnel", "get_leads_by_source", "get_lead_response_time"],
     "hr": ["get_hr_summary"],
     "ops": ["get_project_summary", "get_loan_summary", "get_mailings", "get_social"],
 }
 ALL_TOOLS = frozenset(t for g in TOOL_GROUPS.values() for t in g) | {"list_companies"}
+# Odoo models with no company field: results are group-wide, so only all-company logins may call these.
+GROUP_WIDE_TOOLS = frozenset({"get_mailings", "get_social"})
 ALWAYS_ALLOWED = frozenset({"list_companies"})  # filtered to the principal's companies
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -34,6 +37,8 @@ class Principal:
     companies: frozenset | None   # None => all companies
 
     def can_tool(self, tool: str) -> bool:
+        if tool in GROUP_WIDE_TOOLS and self.companies is not None:
+            return False  # would leak other companies' data to a company-restricted login
         return tool in ALWAYS_ALLOWED or self.tools is None or tool in self.tools
 
     def can_company(self, company_id) -> bool:

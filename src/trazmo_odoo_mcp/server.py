@@ -98,6 +98,21 @@ def build_mcp(client: OdooClient, today=_today) -> FastMCP:
         return await run("get_crm_summary", company_id, T.crm_summary, client, company_id)
 
     @mcp.tool()
+    async def get_lead_funnel(company_id: int, days: int = 30) -> dict:
+        """Lead funnel for leads created in the last N days (1-365): created, qualified, open, won, lost, stages, lost reasons. Aggregates only; no contact details."""
+        return await run("get_lead_funnel", company_id, T.lead_funnel, client, company_id, today(), days)
+
+    @mcp.tool()
+    async def get_leads_by_source(company_id: int, days: int = 30) -> dict:
+        """Lead volume and win rate by source, medium and campaign (top 10 + Other) for the last N days."""
+        return await run("get_leads_by_source", company_id, T.leads_by_source, client, company_id, today(), days)
+
+    @mcp.tool()
+    async def get_lead_response_time(company_id: int, days: int = 30) -> dict:
+        """Time from lead creation to assignment (response-time proxy) and open leads nobody owns."""
+        return await run("get_lead_response_time", company_id, T.lead_response_time, client, company_id, today(), days)
+
+    @mcp.tool()
     async def get_sales_summary(company_id: int) -> dict:
         """Sale order count (with state breakdown)."""
         return await run("get_sales_summary", company_id, T.sales_summary, client, company_id)

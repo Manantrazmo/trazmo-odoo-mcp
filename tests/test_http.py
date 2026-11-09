@@ -14,7 +14,8 @@ LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
 
 EXPECTED = {"list_companies", "get_invoice_summary", "get_cash_positions", "get_cash_flow_by_month",
             "get_ytd_mtd", "get_expense_breakdown", "get_crm_summary", "get_sales_summary", "get_hr_summary",
-            "get_project_summary", "get_loan_summary", "get_mailings", "get_social"}
+            "get_project_summary", "get_loan_summary", "get_mailings", "get_social",
+            "get_lead_funnel", "get_leads_by_source", "get_lead_response_time"}
 
 
 def P(*entries):

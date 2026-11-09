@@ -58,7 +58,8 @@ MODELS: dict[str, ModelSpec] = {
     "account.journal": _m("id name type default_account_id currency_id active", "company_id"),
     "res.partner": _m("id name is_company parent_id"),
     "res.company": _m("id name currency_id"),
-    "crm.lead": _m("id stage_id expected_revenue probability active type", "company_id"),
+    "crm.lead": _m("id stage_id expected_revenue probability active type create_date date_open day_open "
+                   "date_closed source_id medium_id campaign_id lost_reason_id user_id", "company_id"),
     "sale.order": _m("id state amount_total", "company_id"),
     "hr.employee": _m("id department_id active", "company_id"),
     "hr.leave": _m("id state employee_id employee_id.company_id", "employee_id.company_id"),

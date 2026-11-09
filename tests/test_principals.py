@@ -38,7 +38,7 @@ def test_tools_list_filtered_per_login(web):
     assert names(web, DIR_TOKEN) == {"list_companies", "get_invoice_summary", "get_cash_positions",
                                      "get_cash_flow_by_month", "get_ytd_mtd", "get_expense_breakdown"}
     assert names(web, HR_TOKEN) == {"list_companies", "get_hr_summary"}
-    assert len(names(web, TOKEN)) == 13
+    assert len(names(web, TOKEN)) == 16
 
 
 def test_director_limited_to_assigned_company(web, fake):
@@ -104,3 +104,13 @@ def test_cli_add_list_revoke(tmp_path, capsys):
     assert p.can_tool("get_crm_summary") and not p.can_tool("get_hr_summary") and p.can_company(2) and not p.can_company(3)
     principals_cli.main(["revoke", "cfo", "--file", f])
     assert json.load(open(f)) == []
+
+
+def test_group_wide_tools_denied_to_company_restricted_logins(web):
+    ops_dir = {"name": "ops-dir", "token_sha256": hash_token("ops-dir-token"), "tools": ["ops"], "companies": [3]}
+    from test_http import settings as st
+    import pytest as _p  # noqa: F401
+    p = parse_principals(json.dumps([ops_dir]))[0]
+    assert not p.can_tool("get_mailings") and not p.can_tool("get_social") and p.can_tool("get_project_summary")
+    full = parse_principals(json.dumps([{**ops_dir, "name": "all", "companies": "*"}]))[0]
+    assert full.can_tool("get_mailings")

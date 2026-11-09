@@ -270,6 +270,86 @@ def expense_breakdown(c: OdooClient, company_id: int, today: date, months: int =
             "total": total, "by_account": accounts, "by_vendor": out, **note}
 
 
+# ---- leads (aggregates only: no names, emails, phones or free text are ever read) ----------
+ANY_ACTIVE = ("active", "in", [True, False])  # explicit leaf: include archived (lost) leads
+LEAD_TOP = 10
+
+
+def _window(today: date, days: int) -> tuple[int, str]:
+    days = max(1, min(int(days), 365))
+    return days, (today - timedelta(days=days)).isoformat()
+
+
+def lead_funnel(c: OdooClient, company_id: int, today: date, days: int = 30) -> dict:
+    co = company(company_id)
+    days, since = _window(today, days)
+    base = [ANY_ACTIVE, ("create_date", ">=", since)]
+    n = lambda extra: c.search_count("crm.lead", base + extra, company_id)  # noqa: E731
+    created = n([])
+    won = n([("probability", "=", 100)])
+    lost = n([("active", "=", False), ("probability", "=", 0)])
+    qualified = n([("type", "=", "opportunity")])
+    open_ = n([("active", "=", True), ("probability", "<", 100)])
+    stages = c.read_group("crm.lead", [("create_date", ">=", since), ("active", "=", True),
+                                       ("probability", "<", 100)],
+                          ["expected_revenue:sum", "stage_id"], ["stage_id"], company_id)
+    reasons = c.read_group("crm.lead", base + [("active", "=", False), ("probability", "=", 0)],
+                           ["lost_reason_id"], ["lost_reason_id"], company_id)
+    pct = lambda a, b: round(100 * a / b, 1) if b else None  # noqa: E731
+    return {"company": co, "currency": co["currency"], "window_days": days, "since": since,
+            "created": created, "qualified": qualified, "open": open_, "won": won, "lost": lost,
+            "qualified_pct": pct(qualified, created), "win_pct": pct(won, created),
+            "open_by_stage": [{"stage": _name(g["stage_id"]) or "None", "count": int(g["__count"]),
+                               "value": r2(g.get("expected_revenue"))} for g in stages],
+            "top_lost_reasons": sorted(
+                ({"reason": _name(g["lost_reason_id"]) or "Unspecified", "count": int(g["__count"])}
+                 for g in reasons), key=lambda x: x["count"], reverse=True)[:5]}
+
+
+def _ranked(rows: list[dict], field: str) -> list[dict]:
+    out = sorted(({"name": _name(g[field]) or "(none)", "count": int(g["__count"])} for g in rows),
+                 key=lambda x: x["count"], reverse=True)
+    top, rest = out[:LEAD_TOP], sum(x["count"] for x in out[LEAD_TOP:])
+    return top + ([{"name": "Other", "count": rest}] if rest else [])
+
+
+def leads_by_source(c: OdooClient, company_id: int, today: date, days: int = 30) -> dict:
+    co = company(company_id)
+    days, since = _window(today, days)
+    base = [ANY_ACTIVE, ("create_date", ">=", since)]
+    res = {"company": co, "window_days": days, "since": since}
+    for key, field in (("by_source", "source_id"), ("by_medium", "medium_id"), ("by_campaign", "campaign_id")):
+        all_ = c.read_group("crm.lead", base, [field], [field], company_id)
+        won = {_id(g[field]): int(g["__count"]) for g in
+               c.read_group("crm.lead", base + [("probability", "=", 100)], [field], [field], company_id)}
+        rows = _ranked(all_, field)
+        ids = {(_name(g[field]) or "(none)"): _id(g[field]) for g in all_}
+        for r in rows:
+            r["won"] = won.get(ids.get(r["name"]), 0) if r["name"] != "Other" else None
+            r["win_pct"] = round(100 * r["won"] / r["count"], 1) if r["won"] is not None and r["count"] else None
+        res[key] = rows
+    return res
+
+
+def lead_response_time(c: OdooClient, company_id: int, today: date, days: int = 30) -> dict:
+    """Assignment-based proxy: Odoo has no stored 'first contact' time, so this measures create -> assigned."""
+    co = company(company_id)
+    days, since = _window(today, days)
+    base = [ANY_ACTIVE, ("create_date", ">=", since)]
+    avg = c.read_group("crm.lead", base + [("date_open", "!=", False)], ["day_open:avg"], ["company_id"], company_id)
+    open_unassigned = [("active", "=", True), ("probability", "<", 100), ("user_id", "=", False)]
+    stale_cut = (today - timedelta(days=2)).isoformat()
+    return {"company": co, "window_days": days, "since": since,
+            "basis": "created -> assigned to a salesperson (proxy for response time)",
+            "avg_days_to_assign": round(float(avg[0].get("day_open") or 0), 2) if avg else None,
+            "assigned_within_1_day": c.search_count("crm.lead", base + [("day_open", "<=", 1), ("date_open", "!=", False)],
+                                                    company_id),
+            "open_unassigned": c.search_count("crm.lead", [("create_date", ">=", since)] + open_unassigned, company_id),
+            "open_unassigned_older_than_2_days": c.search_count(
+                "crm.lead", [("create_date", ">=", since), ("create_date", "<", stale_cut)] + open_unassigned,
+                company_id)}
+
+
 # ---- 7-12 ------------------------------------------------------------------
 def crm_summary(c: OdooClient, company_id: int) -> dict:
     co = company(company_id)
