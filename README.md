@@ -17,7 +17,7 @@ Replaces an Odoo API key pasted into a scheduled-task prompt: the prompt holds n
 `mailing.mailing` and `social.post` have no company field in Odoo, so those two are group level (`company_scoped: false`). Dates use `REPORT_TZ` (default Asia/Karachi). Results include `"truncated": true` if any query hit the 500-row cap.
 
 ### Transactions (`ledger` group, row-level)
-`search_transactions` (posted journal items, newest first, max 100 per call, `offset` paging, date span <= 366 days, filters: account type, journal type, account code/name, company counterparty, amount range) and `get_transaction_totals` (debit/credit/net by account, partner or journal). Never returned: memos/labels, narrations, bank account numbers, attachments. Individuals appear as "Individual (name withheld)" and cannot be searched by name; partner totals use the same small-group suppression as expenses. Grant `ledger` explicitly per login (`tools: "*"` includes it).
+`search_transactions` (posted journal items, newest first, max 100 per call, `offset` paging, date span <= 366 days, filters: account type, journal type, account code/name, company counterparty, amount range) and `get_transaction_totals` (debit/credit/net by account, partner or journal). Never returned: memos/labels, narrations, bank account numbers, attachments. Individuals appear as "Individual (name withheld)" and cannot be searched by name; partner totals use the same small-group suppression as expenses. `tools: "*"` does **not** include `ledger` or `hr`; name them (e.g. `["*", "ledger"]`). Partner totals only accept whole-month windows, income/expense, and no account search.
 
 ## Develop & test
 ```bash
@@ -44,7 +44,7 @@ ODOO_LOGIN=<readonly-user-login> ./deploy.sh
 `deploy.sh` enables APIs, creates the service account, bootstraps a minimal smoke-test login (token held in a variable, never printed), grants per-secret access, deploys, then smoke-tests healthz / 401 / 200 / tools count / write rejection.
 
 ## Logins (scheduled task, leadership, directors, HR)
-Tool groups: `finance`, `crm`, `leads`, `ledger`, `hr`, `ops` (or individual tool names, or `*`). Companies: ids or `*`.
+`"*"` = every tool except `ledger` and `hr`, which must be named. Tool groups: `finance`, `crm`, `leads`, `ledger`, `hr`, `ops` (or individual tool names, or `*`). Companies: ids or `*`.
 ```bash
 PYTHONPATH=src python3 -m trazmo_odoo_mcp.principals_cli add scheduled-task --tools finance,crm,ops --companies '*' --project <PROJECT_ID>
 PYTHONPATH=src python3 -m trazmo_odoo_mcp.principals_cli add director-tamkeen --tools finance --companies 3 --project <PROJECT_ID>

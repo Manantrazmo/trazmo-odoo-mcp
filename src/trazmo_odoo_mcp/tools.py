@@ -441,6 +441,19 @@ def transaction_totals(c: OdooClient, company_id: int, today: date, group_by: st
     co = company(company_id)
     if group_by not in ("account", "partner", "journal"):
         raise ValueError("group_by must be account, partner or journal")
+    if group_by == "partner":
+        # Fixed, coarse slices only: arbitrary narrowing filters would let callers difference away the
+        # small-group suppression (e.g. by shifting which companies fall into "Other").
+        if account_search or journal_type:
+            raise ValueError("account_search and journal_type are not available with group_by=partner")
+        if account_type not in (None, "income", "expense"):
+            raise ValueError("group_by=partner supports account_type income or expense only")
+        if not date_from and not date_to:
+            date_from, date_to = today.replace(day=1).isoformat(), today.isoformat()
+        d1, d2 = _tx_dates(today, date_from, date_to)
+        month_end = date(d2.year, d2.month, calendar.monthrange(d2.year, d2.month)[1])
+        if d1.day != 1 or d2 not in (month_end, today):
+            raise ValueError("group_by=partner needs whole months: date_from on the 1st, date_to a month end (or today)")
     dom, d_from, d_to = _tx_domain(c, company_id, today, date_from, date_to, account_type, journal_type,
                                    account_search, None)
     field = {"account": "account_id", "partner": "partner_id", "journal": "journal_id"}[group_by]

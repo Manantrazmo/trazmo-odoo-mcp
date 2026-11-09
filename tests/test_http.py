@@ -23,7 +23,7 @@ def P(*entries):
     return parse_principals(json.dumps(list(entries)))
 
 
-FULL = {"name": "admin", "token_sha256": hash_token(TOKEN), "tools": "*", "companies": "*"}
+FULL = {"name": "admin", "token_sha256": hash_token(TOKEN), "tools": ["*", "ledger", "hr"], "companies": "*"}
 
 
 def settings(limit=60, extra=()):

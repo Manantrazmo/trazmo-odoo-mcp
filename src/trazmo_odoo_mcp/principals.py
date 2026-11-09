@@ -24,6 +24,8 @@ TOOL_GROUPS = {
     "ops": ["get_project_summary", "get_loan_summary", "get_mailings", "get_social"],
 }
 ALL_TOOLS = frozenset(t for g in TOOL_GROUPS.values() for t in g) | {"list_companies"}
+# Sensitive groups a wildcard never grants: a login gets these only by naming them ("ledger", "hr").
+EXPLICIT_ONLY = frozenset(TOOL_GROUPS["ledger"] + TOOL_GROUPS["hr"])
 # Odoo models with no company field: results are group-wide, so only all-company logins may call these.
 GROUP_WIDE_TOOLS = frozenset({"get_mailings", "get_social"})
 ALWAYS_ALLOWED = frozenset({"list_companies"})  # filtered to the principal's companies
@@ -73,13 +75,16 @@ def parse_principals(text: str) -> tuple[Principal, ...]:
 
 
 def _tools(name, spec):
+    """'*' means every tool EXCEPT the explicit-only groups; name those to grant them (e.g. ["*", "ledger"])."""
     if spec == "*":
-        return None
+        spec = ["*"]
     if not isinstance(spec, list) or not spec:
         raise ValueError(f"Principal {name}: tools must be '*' or a non-empty list")
     resolved = set()
     for item in spec:
-        if item in TOOL_GROUPS:
+        if item == "*":
+            resolved.update(ALL_TOOLS - EXPLICIT_ONLY)
+        elif item in TOOL_GROUPS:
             resolved.update(TOOL_GROUPS[item])
         elif item in ALL_TOOLS:
             resolved.add(item)

@@ -309,10 +309,25 @@ def test_transaction_totals_by_account_and_partner(client, fake):
     _partners(fake)
     fake.on(gb("account.move.line", "partner_id"), [{"partner_id": [1, "Acme Ltd"], "balance": 100},
                                                     {"partner_id": [2, "Ali Khan"], "balance": 40}])
-    r = T.transaction_totals(client, 2, TODAY, "partner")
-    assert r["groups"] == [] and "withheld" in r["note"] and "Ali Khan" not in str(r)
+    r = T.transaction_totals(client, 2, TODAY, "partner")  # default: this month to date
+    assert r["from"] == "2026-11-01" and r["groups"] == [] and "withheld" in r["note"] and "Ali Khan" not in str(r)
 
 
 def test_ledger_never_reads_memo_or_bank_fields():
     from trazmo_odoo_mcp.odoo import MODELS
     assert not {"name", "ref", "narration", "partner_bank_id", "payment_ref"} & MODELS["account.move.line"].fields
+
+
+@pytest.mark.parametrize("kw", [dict(account_search="rent"), dict(journal_type="bank"), dict(account_type="asset_cash"),
+                                dict(date_from="2026-10-05", date_to="2026-10-31"),
+                                dict(date_from="2026-10-01", date_to="2026-10-20")])
+def test_partner_totals_reject_narrowing_filters_and_partial_months(client, fake, kw):
+    with pytest.raises(ValueError):
+        T.transaction_totals(client, 2, TODAY, "partner", **kw)
+
+
+def test_partner_totals_accept_whole_months(client, fake):
+    fake.on(gb("account.move.line", "partner_id"), [])
+    assert T.transaction_totals(client, 2, TODAY, "partner", date_from="2026-09-01", date_to="2026-10-31",
+                                account_type="expense")["groups"] == []
+    assert T.transaction_totals(client, 2, TODAY, "partner", date_from="2026-11-01", date_to="2026-11-09")

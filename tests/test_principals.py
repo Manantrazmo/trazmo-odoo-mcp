@@ -120,3 +120,12 @@ def test_ledger_group_is_explicit():
     fin = parse_principals(json.dumps([{"name": "d", "token_sha256": "0" * 64, "tools": ["finance"], "companies": [3]}]))[0]
     led = parse_principals(json.dumps([{"name": "c", "token_sha256": "1" * 64, "tools": ["finance", "ledger"], "companies": [3]}]))[0]
     assert not fin.can_tool("search_transactions") and led.can_tool("search_transactions")
+
+
+def test_wildcard_never_grants_ledger_or_hr():
+    star = parse_principals(json.dumps([{"name": "l", "token_sha256": "2" * 64, "tools": "*", "companies": "*"}]))[0]
+    assert star.can_tool("get_cash_positions") and star.can_tool("get_lead_funnel")
+    assert not star.can_tool("search_transactions") and not star.can_tool("get_transaction_totals")
+    assert not star.can_tool("get_hr_summary")
+    both = parse_principals(json.dumps([{"name": "l", "token_sha256": "2" * 64, "tools": ["*", "ledger", "hr"], "companies": "*"}]))[0]
+    assert both.can_tool("search_transactions") and both.can_tool("get_hr_summary") and both.can_tool("get_mailings")
