@@ -1,15 +1,8 @@
 """ASGI guard: bearer auth on /mcp, unauthenticated /healthz, per-instance rate limit."""
-import hashlib
-import hmac
 import threading
 import time
 
-
-def token_matches(provided: str, expected: str) -> bool:
-    # Hash both so the compare is constant-time regardless of length.
-    a = hashlib.sha256(provided.encode()).digest()
-    b = hashlib.sha256(expected.encode()).digest()
-    return hmac.compare_digest(a, b)
+from .principals import authenticate, current_principal
 
 
 class RateLimiter:
@@ -35,10 +28,11 @@ async def _respond(send, status: int, body: bytes = b"", headers=()):
 
 
 class GuardMiddleware:
-    def __init__(self, app, bearer_token: str, limiter: RateLimiter, fail_limiter: RateLimiter | None = None):
-        if not bearer_token:
-            raise RuntimeError("Bearer token must not be empty")
-        self.app, self.token, self.limiter = app, bearer_token, limiter
+    def __init__(self, app, principals, per_minute: int, fail_limiter: RateLimiter | None = None):
+        if not principals:
+            raise RuntimeError("At least one principal is required")
+        self.app, self.principals, self.per_minute = app, tuple(principals), per_minute
+        self.limiters = {p.name: RateLimiter(per_minute) for p in self.principals}  # per principal
         self.fail_limiter = fail_limiter or RateLimiter(120)
 
     async def __call__(self, scope, receive, send):
@@ -53,10 +47,16 @@ class GuardMiddleware:
             return await _respond(send, 404)
         auth = dict(scope["headers"]).get(b"authorization", b"").decode("latin-1")
         scheme, _, provided = auth.partition(" ")
-        if scheme.lower() != "bearer" or not provided or not token_matches(provided.strip(), self.token):
+        principal = authenticate(self.principals, provided.strip()) \
+            if scheme.lower() == "bearer" and provided.strip() else None
+        if principal is None:
             if not self.fail_limiter.allow():  # cap unauthenticated floods too
                 return await _respond(send, 429, headers=[(b"retry-after", b"60")])
             return await _respond(send, 401, headers=[(b"www-authenticate", b"Bearer")])
-        if not self.limiter.allow():
+        if not self.limiters[principal.name].allow():
             return await _respond(send, 429, headers=[(b"retry-after", b"60")])
-        return await self.app(scope, receive, send)
+        reset = current_principal.set(principal)
+        try:
+            return await self.app(scope, receive, send)
+        finally:
+            current_principal.reset(reset)

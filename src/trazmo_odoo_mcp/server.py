@@ -11,15 +11,24 @@ from . import tools as T
 from .audit import audit, start_row_counter
 from .config import Settings
 from .odoo import OdooClient, OdooError, ReadOnlyViolation
-from .security import GuardMiddleware, RateLimiter
+from .principals import current_principal
+from .security import GuardMiddleware
 
 
 def _today():
     return datetime.now(ZoneInfo(os.environ.get("REPORT_TZ", "Asia/Karachi"))).date()
 
 
+class ScopedMCP(FastMCP):
+    """tools/list shows each login only the tools it may call."""
+
+    async def list_tools(self):
+        p = current_principal.get()
+        return [t for t in await super().list_tools() if p is not None and p.can_tool(t.name)]
+
+
 def build_mcp(client: OdooClient, today=_today) -> FastMCP:
-    mcp = FastMCP(
+    mcp = ScopedMCP(
         "trazmo-odoo",
         instructions="Read-only aggregated Odoo reporting for Trazmo. Every tool takes company_id "
                      "(1=Trazmo Pvt Ltd PKR, 2=Trazmo Holdings USD, 3=Tamkeen Financial PKR).",
@@ -32,23 +41,31 @@ def build_mcp(client: OdooClient, today=_today) -> FastMCP:
     async def run(name: str, company_id, fn, *a):
         holder = start_row_counter()
         t0 = time.monotonic()
+        p = current_principal.get()
+        who = p.name if p else None
         try:
+            if p is None or not p.can_tool(name):  # fail closed; same message for unknown/forbidden
+                raise ValueError("Not permitted")
+            if company_id is not None and not p.can_company(company_id):
+                raise ValueError("Not permitted")
             result = await asyncio.to_thread(fn, *a)
             if holder[1] and isinstance(result, dict):
                 result["truncated"] = True  # a query hit the 500-row cap; figures may be incomplete
-            audit(name, company_id, holder[0], True, int((time.monotonic() - t0) * 1000))
+            audit(name, company_id, holder[0], True, int((time.monotonic() - t0) * 1000), principal=who)
             return result
         except (ValueError, OdooError, ReadOnlyViolation) as e:
-            audit(name, company_id, holder[0], False, int((time.monotonic() - t0) * 1000), type(e).__name__)
+            audit(name, company_id, holder[0], False, int((time.monotonic() - t0) * 1000), type(e).__name__, who)
             raise
         except Exception as e:
-            audit(name, company_id, holder[0], False, int((time.monotonic() - t0) * 1000), type(e).__name__)
+            audit(name, company_id, holder[0], False, int((time.monotonic() - t0) * 1000), type(e).__name__, who)
             raise RuntimeError("Internal error") from None
 
     @mcp.tool()
     async def list_companies() -> dict:
         """List the Trazmo companies (id, name, currency)."""
-        return await run("list_companies", None, T.list_companies)
+        res = await run("list_companies", None, T.list_companies)
+        p = current_principal.get()
+        return {"companies": [c for c in res["companies"] if p and p.can_company(c["id"])]}
 
     @mcp.tool()
     async def get_invoice_summary(company_id: int) -> dict:
@@ -116,7 +133,7 @@ def build_mcp(client: OdooClient, today=_today) -> FastMCP:
 def create_app(settings: Settings, client: OdooClient | None = None, today=_today):
     client = client or OdooClient(settings.odoo_url, settings.odoo_db, settings.odoo_login, settings.odoo_api_key)
     inner = build_mcp(client, today).streamable_http_app()
-    return GuardMiddleware(inner, settings.bearer_token, RateLimiter(settings.rate_limit_per_min))
+    return GuardMiddleware(inner, settings.principals, settings.rate_limit_per_min)
 
 
 def create_app_from_env():

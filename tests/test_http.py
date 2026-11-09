@@ -5,6 +5,7 @@ from starlette.testclient import TestClient
 
 from conftest import TODAY, gb
 from trazmo_odoo_mcp.config import Settings
+from trazmo_odoo_mcp.principals import hash_token, parse_principals
 from trazmo_odoo_mcp.server import create_app
 
 TOKEN = "test-token-abc123"
@@ -16,8 +17,15 @@ EXPECTED = {"list_companies", "get_invoice_summary", "get_cash_positions", "get_
             "get_project_summary", "get_loan_summary", "get_mailings", "get_social"}
 
 
-def settings(limit=60):
-    return Settings("https://odoo.invalid", "db", "login", "SECRET-KEY", TOKEN, limit)
+def P(*entries):
+    return parse_principals(json.dumps(list(entries)))
+
+
+FULL = {"name": "admin", "token_sha256": hash_token(TOKEN), "tools": "*", "companies": "*"}
+
+
+def settings(limit=60, extra=()):
+    return Settings("https://odoo.invalid", "db", "login", "SECRET-KEY", P(FULL, *extra), limit)
 
 
 @pytest.fixture
@@ -114,7 +122,7 @@ def test_unauthenticated_flood_is_limited(client):
             else:
                 await send({"type": "lifespan.shutdown.complete"})
                 return
-    g = GuardMiddleware(inner, TOKEN, RateLimiter(60), RateLimiter(3))
+    g = GuardMiddleware(inner, P(FULL), 60, RateLimiter(3))
     with TestClient(g) as tc:
         codes = [tc.post("/mcp", json=LIST, headers=H).status_code for _ in range(5)]
     assert codes == [401, 401, 401, 429, 429]
@@ -126,6 +134,6 @@ def test_websocket_scope_fails_closed():
     called = []
     async def inner(scope, receive, send):
         called.append(1)
-    g = GuardMiddleware(inner, TOKEN, RateLimiter(60))
+    g = GuardMiddleware(inner, P(FULL), 60)
     asyncio.run(g({"type": "websocket", "path": "/mcp", "headers": []}, None, None))
     assert called == []

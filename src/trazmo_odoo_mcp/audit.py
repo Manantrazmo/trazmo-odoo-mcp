@@ -26,11 +26,13 @@ def mark_truncated() -> None:
         holder[1] = True
 
 
-def audit(tool: str, company_id, rows: int, ok: bool, ms: int, error: str | None = None) -> None:
+def audit(tool: str, company_id, rows: int, ok: bool, ms: int, error: str | None = None,
+          principal: str | None = None) -> None:
     entry = {
         "severity": "INFO" if ok else "ERROR",
         "message": "tool_call",
         "event": "audit",
+        "principal": principal,
         "tool": tool,
         "company_id": company_id,
         "row_count": rows,
