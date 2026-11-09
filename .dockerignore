@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+tests/
+deploy.sh
+README.md
+.git
