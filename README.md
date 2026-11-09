@@ -16,6 +16,9 @@ Replaces an Odoo API key pasted into a scheduled-task prompt: the prompt holds n
 `list_companies`, `get_invoice_summary`, `get_cash_positions`, `get_cash_flow_by_month(months=6)`, `get_ytd_mtd`, `get_expense_breakdown(months=6)`, `get_crm_summary`, `get_sales_summary`, `get_hr_summary`, `get_project_summary`, `get_loan_summary`, `get_mailings`, `get_social`, `get_lead_funnel`, `get_leads_by_source`, `get_lead_response_time` (no contact details are ever read; response time is created→assigned, since Odoo stores no first-contact time). `get_mailings`/`get_social` are group-wide, so only logins with all companies can call them.
 `mailing.mailing` and `social.post` have no company field in Odoo, so those two are group level (`company_scoped: false`). Dates use `REPORT_TZ` (default Asia/Karachi). Results include `"truncated": true` if any query hit the 500-row cap.
 
+### Transactions (`ledger` group, row-level)
+`search_transactions` (posted journal items, newest first, max 100 per call, `offset` paging, date span <= 366 days, filters: account type, journal type, account code/name, company counterparty, amount range) and `get_transaction_totals` (debit/credit/net by account, partner or journal). Never returned: memos/labels, narrations, bank account numbers, attachments. Individuals appear as "Individual (name withheld)" and cannot be searched by name; partner totals use the same small-group suppression as expenses. Grant `ledger` explicitly per login (`tools: "*"` includes it).
+
 ## Develop & test
 ```bash
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
@@ -41,7 +44,7 @@ ODOO_LOGIN=<readonly-user-login> ./deploy.sh
 `deploy.sh` enables APIs, creates the service account, bootstraps a minimal smoke-test login (token held in a variable, never printed), grants per-secret access, deploys, then smoke-tests healthz / 401 / 200 / tools count / write rejection.
 
 ## Logins (scheduled task, leadership, directors, HR)
-Tool groups: `finance`, `crm`, `leads`, `hr`, `ops` (or individual tool names, or `*`). Companies: ids or `*`.
+Tool groups: `finance`, `crm`, `leads`, `ledger`, `hr`, `ops` (or individual tool names, or `*`). Companies: ids or `*`.
 ```bash
 PYTHONPATH=src python3 -m trazmo_odoo_mcp.principals_cli add scheduled-task --tools finance,crm,ops --companies '*' --project <PROJECT_ID>
 PYTHONPATH=src python3 -m trazmo_odoo_mcp.principals_cli add director-tamkeen --tools finance --companies 3 --project <PROJECT_ID>

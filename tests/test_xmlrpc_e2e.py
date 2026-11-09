@@ -11,7 +11,8 @@ from test_http import EXPECTED, TOKEN, auth, settings
 from trazmo_odoo_mcp.odoo import OdooClient
 from trazmo_odoo_mcp.server import create_app
 
-ARGS = {"get_cash_flow_by_month": {"months": 3}, "get_expense_breakdown": {"months": 3}}
+ARGS = {"get_cash_flow_by_month": {"months": 3}, "get_expense_breakdown": {"months": 3},
+        "get_transaction_totals": {"group_by": "partner"}}
 
 
 @pytest.fixture
@@ -73,3 +74,11 @@ def test_bad_odoo_key_gives_sanitised_error():
         err, text = call(tc, "get_crm_summary", company_id=2)
     srv.shutdown()
     assert err and "WRONG-KEY-123" not in text and "denied" not in text
+
+
+def test_transactions_over_real_transport_mask_people(stack):
+    tc, fake = stack
+    err, out = call(tc, "search_transactions", company_id=2, limit=10)
+    assert not err and len(out["transactions"]) == 2
+    assert {t["counterparty"] for t in out["transactions"]} == {"Acme Supplies Ltd", "Individual (name withheld)"}
+    assert "Ali Khan" not in json.dumps(out)

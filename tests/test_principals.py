@@ -38,7 +38,7 @@ def test_tools_list_filtered_per_login(web):
     assert names(web, DIR_TOKEN) == {"list_companies", "get_invoice_summary", "get_cash_positions",
                                      "get_cash_flow_by_month", "get_ytd_mtd", "get_expense_breakdown"}
     assert names(web, HR_TOKEN) == {"list_companies", "get_hr_summary"}
-    assert len(names(web, TOKEN)) == 16
+    assert len(names(web, TOKEN)) == 18
 
 
 def test_director_limited_to_assigned_company(web, fake):
@@ -114,3 +114,9 @@ def test_group_wide_tools_denied_to_company_restricted_logins(web):
     assert not p.can_tool("get_mailings") and not p.can_tool("get_social") and p.can_tool("get_project_summary")
     full = parse_principals(json.dumps([{**ops_dir, "name": "all", "companies": "*"}]))[0]
     assert full.can_tool("get_mailings")
+
+
+def test_ledger_group_is_explicit():
+    fin = parse_principals(json.dumps([{"name": "d", "token_sha256": "0" * 64, "tools": ["finance"], "companies": [3]}]))[0]
+    led = parse_principals(json.dumps([{"name": "c", "token_sha256": "1" * 64, "tools": ["finance", "ledger"], "companies": [3]}]))[0]
+    assert not fin.can_tool("search_transactions") and led.can_tool("search_transactions")

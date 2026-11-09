@@ -52,8 +52,8 @@ MODELS: dict[str, ModelSpec] = {
         "amount_total amount_residual amount_total_signed amount_residual_signed currency_id",
         "company_id"),
     "account.move.line": _m(
-        "id account_id journal_id partner_id date debit credit balance parent_state "
-        "account_id.account_type",
+        "id account_id journal_id partner_id date debit credit balance parent_state move_name "
+        "account_id.account_type account_id.name account_id.code journal_id.type",
         "company_id"),
     "account.journal": _m("id name type default_account_id currency_id active", "company_id"),
     "res.partner": _m("id name is_company parent_id"),

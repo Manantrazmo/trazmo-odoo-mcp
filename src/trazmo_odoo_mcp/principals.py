@@ -19,6 +19,7 @@ TOOL_GROUPS = {
                 "get_expense_breakdown"],
     "crm": ["get_crm_summary", "get_sales_summary"],
     "leads": ["get_lead_funnel", "get_leads_by_source", "get_lead_response_time"],
+    "ledger": ["search_transactions", "get_transaction_totals"],  # row-level: grant explicitly
     "hr": ["get_hr_summary"],
     "ops": ["get_project_summary", "get_loan_summary", "get_mailings", "get_social"],
 }

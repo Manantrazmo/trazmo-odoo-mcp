@@ -46,6 +46,11 @@ class Fake:
             if model == "account.journal":
                 return [{"id": 1, "name": "Bank", "type": "bank", "default_account_id": [10, "101000 Bank"], "currency_id": False},
                         {"id": 2, "name": "Cash", "type": "cash", "default_account_id": [11, "101500 Cash"], "currency_id": False}]
+            if model == "account.move.line":
+                return [{"id": 1, "date": "2026-11-01", "move_name": "BNK1/2026/0001", "journal_id": [1, "Bank"],
+                         "account_id": [30, "600000 Rent"], "partner_id": [1, "Acme Supplies Ltd"], "debit": 700.0, "credit": 0.0},
+                        {"id": 2, "date": "2026-10-30", "move_name": "BNK1/2026/0002", "journal_id": [1, "Bank"],
+                         "account_id": [30, "600000 Rent"], "partner_id": [2, "Ali Khan"], "debit": 55.0, "credit": 0.0}]
             if model == "account.move":
                 return [{"id": 1, "name": "INV/2026/0001", "partner_id": [1, "Acme Supplies Ltd"],
                          "invoice_date_due": "2026-10-01", "amount_residual_signed": 1200.5},

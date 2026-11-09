@@ -238,3 +238,81 @@ def test_lead_response_time(client, fake):
 def test_lead_tools_never_read_contact_fields():
     from trazmo_odoo_mcp.odoo import MODELS
     assert not {"email_from", "phone", "mobile", "contact_name", "partner_name", "description", "name"} & MODELS["crm.lead"].fields
+
+
+# ---- ledger transactions ----------------------------------------------------
+import pytest  # noqa: E402
+
+AML = lambda m, meth, a, kw: m == "account.move.line"  # noqa: E731
+
+
+def _rows(n):
+    return [{"id": i, "date": "2026-11-01", "move_name": f"E{i}", "journal_id": [1, "Bank"],
+             "account_id": [3, "Rent"], "partner_id": [1 if i % 2 else 2, "x"], "debit": 10.0, "credit": 0.0}
+            for i in range(n)]
+
+
+def _partners(fake):
+    fake.on(M("res.partner", "search_read"), lambda m, meth, a, kw: [
+        p for p in [{"id": 1, "name": "Acme Ltd", "is_company": True, "parent_id": False},
+                    {"id": 2, "name": "Ali Khan", "is_company": False, "parent_id": False}]
+        if any(leaf[0] == "id" and p["id"] in leaf[2] for leaf in a[0] if isinstance(leaf, tuple))
+        or any(leaf == ("is_company", "=", True) for leaf in a[0])])
+
+
+def test_search_transactions_masks_individuals_and_paginates(client, fake):
+    _partners(fake)
+    fake.on(lambda m, meth, a, kw: m == "account.move.line" and meth == "search_read", _rows(3))
+    fake.on(gb("account.move.line", "company_id"), [{"company_id": [2, "x"], "__count": 3, "debit": 30, "credit": 0}])
+    r = T.search_transactions(client, 2, TODAY, limit=2)
+    assert len(r["transactions"]) == 2 and r["has_more"] is True and r["matched"] == {"count": 3, "debit": 30.0, "credit": 0.0}
+    cps = {t["counterparty"] for t in r["transactions"]}
+    assert cps == {"Acme Ltd", "Individual (name withheld)"} and "Ali Khan" not in str(r)
+    call = [c for c in fake.calls if c[0] == "account.move.line" and c[1] == "search_read"][0]
+    assert call[3]["limit"] == 3 and call[3]["order"] == "date desc, id desc"
+    assert ("parent_state", "=", "posted") in call[2][0] and ("company_id", "=", 2) in call[2][0]
+
+
+def test_search_transactions_limits_and_validation(client, fake):
+    _partners(fake)
+    T.search_transactions(client, 2, TODAY, limit=100000)
+    sr = [c for c in fake.calls if c[0] == "account.move.line" and c[1] == "search_read"][0]
+    assert sr[3]["limit"] == T.TX_MAX_ROWS + 1
+    for bad in (dict(date_from="2024-01-01"), dict(date_from="2026-12-01", date_to="2026-11-01"),
+                dict(date_from="nope"), dict(account_type="; drop"), dict(journal_type="x")):
+        with pytest.raises(ValueError):
+            T.search_transactions(client, 2, TODAY, **bad)
+
+
+def test_counterparty_search_only_matches_companies(client, fake):
+    _partners(fake)
+    fake.on(AML, [])
+    T.search_transactions(client, 2, TODAY, counterparty_search="ali")
+    ps = [c for c in fake.calls if c[0] == "res.partner"][0]
+    assert ("is_company", "=", True) in ps[2][0]  # a person's name can never be probed
+
+
+def test_amount_and_account_filters_in_domain(client, fake):
+    _partners(fake)
+    T.search_transactions(client, 2, TODAY, account_search="6000", min_amount=100, max_amount=-500, account_type="expense")
+    d = [c for c in fake.calls if c[1] == "search_read" and c[0] == "account.move.line"][0][2][0]
+    assert ("account_id.code", "=like", "6000%") in d and ("debit", "<=", 500.0) in d
+    assert ("account_id.account_type", "=", "expense") in d
+
+
+def test_transaction_totals_by_account_and_partner(client, fake):
+    fake.on(gb("account.move.line", "account_id"), [{"account_id": [i, f"A{i}"], "__count": 1, "debit": 10, "credit": 0, "balance": 30 - i} for i in range(28)])
+    r = T.transaction_totals(client, 2, TODAY, "account")
+    assert len(r["groups"]) == 26 and r["groups"][-1]["name"] == "Other" and r["groups"][-1]["count"] == 3
+    with pytest.raises(ValueError):
+        T.transaction_totals(client, 2, TODAY, "memo")
+    _partners(fake)
+    fake.on(gb("account.move.line", "partner_id"), [{"partner_id": [1, "Acme Ltd"], "balance": 100},
+                                                    {"partner_id": [2, "Ali Khan"], "balance": 40}])
+    r = T.transaction_totals(client, 2, TODAY, "partner")
+    assert r["groups"] == [] and "withheld" in r["note"] and "Ali Khan" not in str(r)
+
+
+def test_ledger_never_reads_memo_or_bank_fields():
+    from trazmo_odoo_mcp.odoo import MODELS
+    assert not {"name", "ref", "narration", "partner_bank_id", "payment_ref"} & MODELS["account.move.line"].fields

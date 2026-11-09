@@ -113,6 +113,25 @@ def build_mcp(client: OdooClient, today=_today) -> FastMCP:
         return await run("get_lead_response_time", company_id, T.lead_response_time, client, company_id, today(), days)
 
     @mcp.tool()
+    async def search_transactions(company_id: int, date_from: str | None = None, date_to: str | None = None,
+                                  account_type: str | None = None, journal_type: str | None = None,
+                                  account_search: str | None = None, counterparty_search: str | None = None,
+                                  min_amount: float | None = None, max_amount: float | None = None,
+                                  limit: int = 50, offset: int = 0) -> dict:
+        """Posted journal items (read-only), newest first, max 100 per call (use offset). Dates YYYY-MM-DD, span <= 366 days (default last 30). Filters: account_type (e.g. expense, asset_cash), journal_type (sale|purchase|bank|cash|general), account_search (code prefix or name), counterparty_search (companies only), min/max amount. Individuals' names are withheld; memos and bank details are never returned."""
+        return await run("search_transactions", company_id, T.search_transactions, client, company_id, today(),
+                         date_from, date_to, account_type, journal_type, account_search, counterparty_search,
+                         min_amount, max_amount, limit, offset)
+
+    @mcp.tool()
+    async def get_transaction_totals(company_id: int, group_by: str = "account", date_from: str | None = None,
+                                     date_to: str | None = None, account_type: str | None = None,
+                                     journal_type: str | None = None, account_search: str | None = None) -> dict:
+        """Posted transaction totals (debit, credit, net) grouped by account, partner or journal for a date range (<= 366 days). Individuals are aggregated, never named."""
+        return await run("get_transaction_totals", company_id, T.transaction_totals, client, company_id, today(),
+                         group_by, date_from, date_to, account_type, journal_type, account_search)
+
+    @mcp.tool()
     async def get_sales_summary(company_id: int) -> dict:
         """Sale order count (with state breakdown)."""
         return await run("get_sales_summary", company_id, T.sales_summary, client, company_id)

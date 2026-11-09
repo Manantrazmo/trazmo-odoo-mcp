@@ -214,6 +214,43 @@ def ytd_mtd(c: OdooClient, company_id: int, today: date) -> dict:
 
 
 # ---- 6 ---------------------------------------------------------------------
+def partner_rollup(rows: list[dict], pmap: dict, key: str, other_label: str, top_n: int):
+    """Group read_group rows by partner. Companies are listed by name (top_n + Other); individuals are
+    never named: they are aggregated (>= MIN_PEOPLE_GROUP people) or merged into Other / suppressed."""
+    named: dict = {}
+    people: set = set()
+    people_total = no_partner = 0.0
+    for g in rows:
+        pid, amt = _id(g["partner_id"]), float(g.get("balance") or 0)
+        if pid is None:
+            no_partner += amt
+            continue
+        p = pmap[pid]
+        if p["individual"]:
+            people.add(p["key"])
+            people_total += amt
+        else:
+            named[p["key"]] = (p["name"], named.get(p["key"], (None, 0.0))[1] + amt)
+    ranked = sorted(named.values(), key=lambda kv: abs(kv[1]), reverse=True)
+    out = [{key: n, "amount": r2(v)} for n, v in ranked[:top_n]]
+    other, other_count = sum(v for _, v in ranked[top_n:]), max(0, len(ranked) - top_n)
+    suppress = False
+    if 0 < len(people) < MIN_PEOPLE_GROUP:  # too few people to show or merge on their own
+        other, other_count = other + people_total, other_count + len(people)
+        people, people_total = set(), 0.0
+        while other_count < MIN_PEOPLE_GROUP and out:  # pull the smallest named entries into "Other"
+            last = out.pop()
+            other, other_count = other + last["amount"], other_count + 1
+        suppress = other_count < MIN_PEOPLE_GROUP  # not enough contributors even after pulling all
+    if other_count and not suppress:
+        out.append({key: other_label, "amount": r2(other)})
+    if people:
+        out.append({key: STAFF_LABEL.format(n=len(people)), "amount": r2(people_total)})
+    if no_partner:
+        out.append({key: "(No partner on entry)", "amount": r2(no_partner)})
+    return out, suppress
+
+
 def expense_breakdown(c: OdooClient, company_id: int, today: date, months: int = 6) -> dict:
     co = company(company_id)
     months = max(1, min(int(months), 24))
@@ -230,38 +267,7 @@ def expense_breakdown(c: OdooClient, company_id: int, today: date, months: int =
     by_partner = c.read_group("account.move.line", dom, ["balance:sum"], ["partner_id"], company_id,
                               orderby="balance desc")
     pmap = resolve_partners(c, [_id(g["partner_id"]) for g in by_partner if _id(g["partner_id"])])
-    vendors: dict = {}
-    people: set = set()
-    people_total = 0.0
-    no_partner = 0.0
-    for g in by_partner:
-        pid, amt = _id(g["partner_id"]), float(g.get("balance") or 0)
-        if pid is None:
-            no_partner += amt
-            continue
-        p = pmap[pid]
-        if p["individual"]:
-            people.add(p["key"])
-            people_total += amt
-        else:
-            vendors[p["key"]] = (p["name"], vendors.get(p["key"], (None, 0.0))[1] + amt)
-    ranked = sorted(vendors.values(), key=lambda kv: abs(kv[1]), reverse=True)
-    out = [{"vendor": n, "amount": r2(v)} for n, v in ranked[:8]]
-    other, other_count = sum(v for _, v in ranked[8:]), max(0, len(ranked) - 8)
-    suppress = False
-    if 0 < len(people) < MIN_PEOPLE_GROUP:  # too few people to show or merge on their own
-        other, other_count = other + people_total, other_count + len(people)
-        people, people_total = set(), 0.0
-        while other_count < MIN_PEOPLE_GROUP and out:  # pull the smallest named vendors into "Other"
-            last = out.pop()
-            other, other_count = other + last["amount"], other_count + 1
-        suppress = other_count < MIN_PEOPLE_GROUP  # not enough contributors even after pulling all
-    if other_count and not suppress:
-        out.append({"vendor": "Other vendors", "amount": r2(other)})
-    if people:
-        out.append({"vendor": STAFF_LABEL.format(n=len(people)), "amount": r2(people_total)})
-    if no_partner:
-        out.append({"vendor": "(No partner on entry)", "amount": r2(no_partner)})
+    out, suppress = partner_rollup(by_partner, pmap, "vendor", "Other vendors", 8)
     total, note = r2(sum(v for _, v in items)), {}
     if suppress:  # nothing safe to merge into: withhold the vendor view and total (by_account sums to total)
         out, accounts, total = [], [], None
@@ -348,6 +354,114 @@ def lead_response_time(c: OdooClient, company_id: int, today: date, days: int = 
             "open_unassigned_older_than_2_days": c.search_count(
                 "crm.lead", [("create_date", ">=", since), ("create_date", "<", stale_cut)] + open_unassigned,
                 company_id)}
+
+
+# ---- ledger: row-level transactions (counterparty names for individuals are never returned) ---------
+TX_MAX_ROWS = 100
+TX_MAX_SPAN_DAYS = 366
+TX_TOP = 25
+ACCOUNT_TYPES = frozenset({
+    "asset_receivable", "asset_cash", "asset_current", "asset_non_current", "asset_prepayments", "asset_fixed",
+    "liability_payable", "liability_credit_card", "liability_current", "liability_non_current", "equity",
+    "equity_unaffected", "income", "income_other", "expense", "expense_depreciation", "expense_direct_cost",
+    "off_balance"})
+JOURNAL_TYPES = frozenset({"sale", "purchase", "bank", "cash", "general"})
+
+
+def _tx_dates(today: date, date_from, date_to) -> tuple[date, date]:
+    try:
+        d_to = date.fromisoformat(date_to) if date_to else today
+        d_from = date.fromisoformat(date_from) if date_from else d_to - timedelta(days=30)
+    except ValueError:
+        raise ValueError("Dates must be ISO format YYYY-MM-DD") from None
+    if d_from > d_to or (d_to - d_from).days > TX_MAX_SPAN_DAYS:
+        raise ValueError(f"date_from must be <= date_to and span at most {TX_MAX_SPAN_DAYS} days")
+    return d_from, d_to
+
+
+def _tx_domain(c, company_id, today, date_from, date_to, account_type, journal_type, account_search,
+               counterparty_search, min_amount=None, max_amount=None):
+    d_from, d_to = _tx_dates(today, date_from, date_to)
+    dom = POSTED_LINE + [("date", ">=", d_from.isoformat()), ("date", "<=", d_to.isoformat())]
+    if account_type:
+        if account_type not in ACCOUNT_TYPES:
+            raise ValueError("Unknown account_type")
+        dom.append(("account_id.account_type", "=", account_type))
+    if journal_type:
+        if journal_type not in JOURNAL_TYPES:
+            raise ValueError("Unknown journal_type")
+        dom.append(("journal_id.type", "=", journal_type))
+    if account_search:
+        q = account_search.strip()[:60]
+        dom.append(("account_id.code", "=like", q + "%") if q.isdigit() else ("account_id.name", "ilike", q))
+    if counterparty_search:
+        # companies only: individuals cannot be searched by name, so a person's entries can't be probed
+        ids = [r["id"] for r in c.search_read(
+            "res.partner", [("is_company", "=", True), ("name", "ilike", counterparty_search.strip()[:60])],
+            ["id"], limit=20)]
+        dom.append(("partner_id", "in", ids or [0]))
+    if min_amount is not None:
+        dom += ["|", ("debit", ">=", abs(float(min_amount))), ("credit", ">=", abs(float(min_amount)))]
+    if max_amount is not None:
+        dom += [("debit", "<=", abs(float(max_amount))), ("credit", "<=", abs(float(max_amount)))]
+    return dom, d_from, d_to
+
+
+def search_transactions(c: OdooClient, company_id: int, today: date, date_from=None, date_to=None,
+                        account_type=None, journal_type=None, account_search=None, counterparty_search=None,
+                        min_amount=None, max_amount=None, limit: int = 50, offset: int = 0) -> dict:
+    co = company(company_id)
+    limit, offset = max(1, min(int(limit), TX_MAX_ROWS)), max(0, min(int(offset), 10_000))
+    dom, d_from, d_to = _tx_domain(c, company_id, today, date_from, date_to, account_type, journal_type,
+                                   account_search, counterparty_search, min_amount, max_amount)
+    rows = c.search_read("account.move.line", dom,
+                         ["date", "move_name", "journal_id", "account_id", "partner_id", "debit", "credit"],
+                         company_id, order="date desc, id desc", limit=limit + 1, offset=offset)
+    has_more, rows = len(rows) > limit, rows[:limit]
+    pmap = resolve_partners(c, [_id(r["partner_id"]) for r in rows if _id(r["partner_id"])])
+    agg = c.read_group("account.move.line", dom, ["debit:sum", "credit:sum"], ["company_id"], company_id)
+    out = []
+    for r in rows:
+        pid = _id(r["partner_id"])
+        p = pmap.get(pid)
+        out.append({"date": r["date"], "entry": r["move_name"] or None, "journal": _name(r["journal_id"]),
+                    "account": _name(r["account_id"]),
+                    "counterparty": None if pid is None else
+                    ("Individual (name withheld)" if p["individual"] else p["name"]),
+                    "debit": r2(r["debit"]), "credit": r2(r["credit"])})
+    return {"company": co, "currency": co["currency"], "from": d_from.isoformat(), "to": d_to.isoformat(),
+            "matched": {"count": int(sum(g["__count"] for g in agg)), "debit": r2(_group_sum(agg, "debit")),
+                        "credit": r2(_group_sum(agg, "credit"))},
+            "offset": offset, "limit": limit, "has_more": has_more, "transactions": out}
+
+
+def transaction_totals(c: OdooClient, company_id: int, today: date, group_by: str = "account",
+                       date_from=None, date_to=None, account_type=None, journal_type=None,
+                       account_search=None) -> dict:
+    co = company(company_id)
+    if group_by not in ("account", "partner", "journal"):
+        raise ValueError("group_by must be account, partner or journal")
+    dom, d_from, d_to = _tx_domain(c, company_id, today, date_from, date_to, account_type, journal_type,
+                                   account_search, None)
+    field = {"account": "account_id", "partner": "partner_id", "journal": "journal_id"}[group_by]
+    rows = c.read_group("account.move.line", dom, ["balance:sum", "debit:sum", "credit:sum", field], [field],
+                        company_id, orderby="balance desc")
+    base = {"company": co, "currency": co["currency"], "from": d_from.isoformat(), "to": d_to.isoformat(),
+            "group_by": group_by}
+    if group_by == "partner":
+        pmap = resolve_partners(c, [_id(g["partner_id"]) for g in rows if _id(g["partner_id"])])
+        groups, suppress = partner_rollup(rows, pmap, "name", "Other partners", TX_TOP)
+        if suppress:
+            return {**base, "groups": [], "note": "Partner view withheld: too few contributors."}
+        return {**base, "groups": groups}
+    items = sorted(({"name": _name(g[field]) or "(none)", "count": int(g["__count"]),
+                     "debit": r2(g.get("debit")), "credit": r2(g.get("credit")),
+                     "net": r2(g.get("balance"))} for g in rows), key=lambda x: abs(x["net"]), reverse=True)
+    top, rest = items[:TX_TOP], items[TX_TOP:]
+    if rest:
+        top.append({"name": "Other", "count": sum(x["count"] for x in rest), "debit": r2(sum(x["debit"] for x in rest)),
+                    "credit": r2(sum(x["credit"] for x in rest)), "net": r2(sum(x["net"] for x in rest))})
+    return {**base, "groups": top}
 
 
 # ---- 7-12 ------------------------------------------------------------------
