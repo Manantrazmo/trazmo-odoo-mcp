@@ -173,8 +173,9 @@ def test_fewer_than_three_people_not_disclosed(client, fake):
                   {"id": 2, "name": "Solo Person", "is_company": False, "parent_id": False}],
                  [{"partner_id": [1, "Co"], "balance": 100}, {"partner_id": [2, "Solo Person"], "balance": 40}])
     vendors = {v["vendor"]: v["amount"] for v in r["by_vendor"]}
-    assert vendors == {"Co": 100.0}  # a lone person's amount must not appear anywhere
-    assert 40.0 not in [v["amount"] for v in r["by_vendor"]] and "vendor_note" in r
+    assert vendors == {"Co": 140.0}  # absorbed into the largest company line, not shown on its own
+    assert r["by_vendor"][0]["includes_withheld_small_amounts"] is True
+    assert sum(v["amount"] for v in r["by_vendor"]) == 140.0 and "vendor_note" in r
     assert "Solo Person" not in str(r) and "people" not in str(r)
 
 
@@ -192,3 +193,10 @@ def test_three_people_aggregated(client, fake):
     people = [{"id": i, "name": f"P{i}", "is_company": False, "parent_id": False} for i in (2, 3, 4)]
     r = _expense(client, fake, people, [{"partner_id": [i, f"P{i}"], "balance": 10} for i in (2, 3, 4)])
     assert r["by_vendor"] == [{"vendor": "Staff & individual reimbursements (3 people, aggregated)", "amount": 30.0}]
+
+
+def test_lone_person_only_suppresses_vendor_view_and_total(client, fake):
+    r = _expense(client, fake, [{"id": 2, "name": "Solo Person", "is_company": False, "parent_id": False}],
+                 [{"partner_id": [2, "Solo Person"], "balance": 40}])
+    assert r["by_vendor"] == [] and r["total"] is None and r["by_account"] == []
+    assert "Solo Person" not in str(r)
