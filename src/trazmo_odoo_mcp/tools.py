@@ -248,33 +248,26 @@ def expense_breakdown(c: OdooClient, company_id: int, today: date, months: int =
     ranked = sorted(vendors.values(), key=lambda kv: abs(kv[1]), reverse=True)
     out = [{"vendor": n, "amount": r2(v)} for n, v in ranked[:8]]
     other, other_count = sum(v for _, v in ranked[8:]), max(0, len(ranked) - 8)
-    withheld = 0.0
-    if 0 < len(people) < MIN_PEOPLE_GROUP:  # too few people to aggregate safely
+    suppress = False
+    if 0 < len(people) < MIN_PEOPLE_GROUP:  # too few people to show or merge on their own
         other, other_count = other + people_total, other_count + len(people)
         people, people_total = set(), 0.0
-        # Only show the merged line if it can't isolate a person: needs >= K contributors,
-        # or contain no person at all (the else case below).
-        if other_count >= MIN_PEOPLE_GROUP:
-            out.append({"vendor": "Other vendors", "amount": r2(other)})
-        else:
-            withheld = other  # fold into the largest vendor line below, so by_vendor still sums to total
-    elif other_count:
+        while other_count < MIN_PEOPLE_GROUP and out:  # pull the smallest named vendors into "Other"
+            last = out.pop()
+            other, other_count = other + last["amount"], other_count + 1
+        suppress = other_count < MIN_PEOPLE_GROUP  # not enough contributors even after pulling all
+    if other_count and not suppress:
         out.append({"vendor": "Other vendors", "amount": r2(other)})
     if people:
         out.append({"vendor": STAFF_LABEL.format(n=len(people)), "amount": r2(people_total)})
     if no_partner:
         out.append({"vendor": "(No partner on entry)", "amount": r2(no_partner)})
     total, note = r2(sum(v for _, v in items)), {}
-    if withheld:
-        if out:  # absorb into the largest company line: no line isolates a person, no differencing gap
-            out[0]["amount"] = r2(out[0]["amount"] + withheld)
-            out[0]["includes_withheld_small_amounts"] = True
-            note = {"vendor_note": "Small individual amounts are included in the line marked "
-                                   "includes_withheld_small_amounts."}
-        else:  # nothing safe to hide it in: withhold the vendor view and total entirely
-            total, note = None, {"vendor_note": "Vendor view and total withheld: too few contributors."}
+    if suppress:  # nothing safe to merge into: withhold the vendor view and total (by_account sums to total)
+        out, accounts, total = [], [], None
+        note = {"vendor_note": "Vendor view and total withheld: too few contributors."}
     return {"company": co, "currency": co["currency"], "from": start.isoformat(), "to": today.isoformat(),
-            "total": total, "by_account": accounts if total is not None else [], "by_vendor": out, **note}
+            "total": total, "by_account": accounts, "by_vendor": out, **note}
 
 
 # ---- 7-12 ------------------------------------------------------------------

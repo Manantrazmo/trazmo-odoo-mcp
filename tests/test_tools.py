@@ -168,35 +168,27 @@ def _expense(client, fake, partners, balances):
 
 
 def test_fewer_than_three_people_not_disclosed(client, fake):
+    # 1 company + 1 person = 2 contributors < 3: nothing safe to merge into -> suppress view and total
     r = _expense(client, fake,
                  [{"id": 1, "name": "Co", "is_company": True, "parent_id": False},
                   {"id": 2, "name": "Solo Person", "is_company": False, "parent_id": False}],
                  [{"partner_id": [1, "Co"], "balance": 100}, {"partner_id": [2, "Solo Person"], "balance": 40}])
-    vendors = {v["vendor"]: v["amount"] for v in r["by_vendor"]}
-    assert vendors == {"Co": 140.0}  # absorbed into the largest company line, not shown on its own
-    assert r["by_vendor"][0]["includes_withheld_small_amounts"] is True
-    assert sum(v["amount"] for v in r["by_vendor"]) == 140.0 and "vendor_note" in r
-    assert "Solo Person" not in str(r) and "people" not in str(r)
+    assert r["by_vendor"] == [] and r["total"] is None and r["by_account"] == []
+    assert "Solo Person" not in str(r) and "includes_withheld" not in str(r)
 
 
-def test_small_group_merged_only_with_enough_other_contributors(client, fake):
-    companies = [{"id": i, "name": f"Co{i}", "is_company": True, "parent_id": False} for i in range(10, 20)]
-    solo = {"id": 2, "name": "Solo Person", "is_company": False, "parent_id": False}
-    r = _expense(client, fake, companies + [solo],
-                 [{"partner_id": [c["id"], c["name"]], "balance": 100 - c["id"]} for c in companies]
-                 + [{"partner_id": [2, "Solo Person"], "balance": 40}])
-    other = [v for v in r["by_vendor"] if v["vendor"] == "Other vendors"][0]
-    assert other["amount"] != 40.0 and "vendor_note" not in r  # 2 companies + 1 person merged, not isolated
+def test_small_group_pulls_smallest_vendors_into_other(client, fake):
+    cos = [{"id": i, "name": f"Co{i}", "is_company": True, "parent_id": False} for i in (1, 2)]
+    solo = {"id": 9, "name": "Solo Person", "is_company": False, "parent_id": False}
+    bal = [{"partner_id": [1, "Co1"], "balance": 100}, {"partner_id": [2, "Co2"], "balance": 50},
+           {"partner_id": [9, "Solo Person"], "balance": 40}]
+    r = _expense(client, fake, cos + [solo], bal)
+    # 1 person + pulls Co2 (and Co1) until >= 3 contributors: a single "Other vendors" line, no named lines
+    assert [v["vendor"] for v in r["by_vendor"]] == ["Other vendors"]
+    assert r["by_vendor"][0]["amount"] == 190.0 and r["total"] is not None
 
 
 def test_three_people_aggregated(client, fake):
     people = [{"id": i, "name": f"P{i}", "is_company": False, "parent_id": False} for i in (2, 3, 4)]
     r = _expense(client, fake, people, [{"partner_id": [i, f"P{i}"], "balance": 10} for i in (2, 3, 4)])
     assert r["by_vendor"] == [{"vendor": "Staff & individual reimbursements (3 people, aggregated)", "amount": 30.0}]
-
-
-def test_lone_person_only_suppresses_vendor_view_and_total(client, fake):
-    r = _expense(client, fake, [{"id": 2, "name": "Solo Person", "is_company": False, "parent_id": False}],
-                 [{"partner_id": [2, "Solo Person"], "balance": 40}])
-    assert r["by_vendor"] == [] and r["total"] is None and r["by_account"] == []
-    assert "Solo Person" not in str(r)
