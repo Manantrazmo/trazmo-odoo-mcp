@@ -39,9 +39,9 @@ def test_every_tool_runs_for_each_company(stack, company_id):
         assert not err, (name, out)
         assert "truncated" not in out
     from trazmo_odoo_mcp.odoo import MODELS
-    scoped = [c for c in fake.seen if MODELS[c[0]].company_field]
+    scoped = [c for c in fake.seen if c[1] != "check_access_rights" and MODELS[c[0]].company_field]
     assert scoped and all(c[2]["allowed_company_ids"] == [company_id] for c in scoped)
-    assert all(m in fake_odoo.READS for _, m, _ in fake.seen)
+    assert all(m in fake_odoo.READS | {"check_access_rights"} for _, m, _ in fake.seen)  # reads + permission probe only
 
 
 def test_values_and_privacy_over_real_transport(stack):

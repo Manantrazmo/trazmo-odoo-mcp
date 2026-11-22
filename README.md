@@ -6,6 +6,7 @@ Replaces an Odoo API key pasted into a scheduled-task prompt: the prompt holds n
 ## Security model
 - **Auth:** `Authorization: Bearer <token>` on `/mcp` (header only; a token in the URL is ignored). Each login has its own token; only SHA-256 hashes are stored (secret `MCP_PRINCIPALS`). Constant-time compare against every login. Missing/wrong/revoked → `401`, empty body. `/healthz` returns `ok` only.
 - **Per-login access:** each login lists the tools (or groups) and the company ids it may use. `tools/list` shows only permitted tools; calls outside the login's tools or companies are refused (`Not permitted`) and audited with the login's name. Rate limits are per login.
+- **Write protection, three layers:** (1) `OdooClient.call()` accepts only four read methods; (2) `_transport_call` independently refuses any other method before anything is sent; (3) on first use the server asks Odoo (`check_access_rights`, a permission query that changes nothing) whether the Odoo user can write to any allowlisted model, and **refuses to serve** if it can, unless `ODOO_ALLOW_WRITABLE_USER=1` explicitly acknowledges it. The server never writes in either case; this stops a powerful credential (e.g. an administrator's key) being used by accident.
 - **Read-only by construction:** no `execute_kw` passthrough. `OdooClient.call()` accepts only `search_read`, `read_group`, `search_count`, `fields_get`, against a model + field allowlist (`src/trazmo_odoo_mcp/odoo.py`). Domains, `fields`, `groupby`, `order` are all validated; caller-supplied `context` is rejected; hard limit 500 rows; every query is scoped to `company_id`.
 - **Privacy:** individuals (non-company partners) are never returned next to an amount. Expense vendors roll up to `Staff & individual reimbursements (N people, aggregated)`; invoice top items show `Individual (name withheld)`.
 - **Logging:** one JSON audit line per call (tool, company_id, row_count, ok, duration, timestamp, error class). No tokens, keys, arguments or results. Uvicorn access log is off.
@@ -18,6 +19,9 @@ Replaces an Odoo API key pasted into a scheduled-task prompt: the prompt holds n
 
 ### Transactions (`ledger` group, row-level)
 `search_transactions` (posted journal items, newest first, max 100 per call, `offset` paging, date span <= 366 days, filters: account type, journal type, account code/name, company counterparty, amount range) and `get_transaction_totals` (debit/credit/net by account, partner or journal). Never returned: memos/labels, narrations, bank account numbers, attachments. Individuals appear as "Individual (name withheld)" and cannot be searched by name; partner totals use the same small-group suppression as expenses. `tools: "*"` does **not** include `ledger` or `hr`; name them (e.g. `["*", "ledger"]`). Partner totals only accept whole-month windows, income/expense, and no account search.
+
+### Using an administrator key for a local test
+The write-access guard will refuse an admin key. To test anyway, acknowledge it explicitly for that run only, e.g. `ODOO_ALLOW_WRITABLE_USER=1 PORT=8777 ODOO_LOGIN=<login> scripts/run_local.sh`. For anything shared or deployed, use a dedicated Odoo user with read-only access rights instead.
 
 ## Develop & test
 ```bash

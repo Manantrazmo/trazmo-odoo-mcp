@@ -22,6 +22,7 @@ PARTNERS = [
 class Fake:
     def __init__(self):
         self.seen = []  # (model, method, context)
+        self.writable = set()  # models on which the fake user has write access
         self.lock = threading.Lock()
 
     def authenticate(self, db, login, key, ctx):
@@ -32,6 +33,8 @@ class Fake:
             self.seen.append((model, method, kwargs.get("context", {})))
         if key != KEY or uid != 7:
             raise PermissionError("denied")
+        if method == "check_access_rights":  # permission query only; changes nothing
+            return args[0] == "write" and model in self.writable
         if method not in READS:
             raise PermissionError("write attempted")  # the server must never get here
         dom = args[0] if args else []

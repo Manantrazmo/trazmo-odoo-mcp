@@ -7,6 +7,7 @@ All access goes through OdooClient.call(), which enforces:
   * company scoping via domain + allowed_company_ids context
 There is deliberately no generic execute_kw passthrough.
 """
+import os
 import re
 import threading
 import xmlrpc.client
@@ -149,6 +150,7 @@ class OdooClient:
         self._timeout = timeout
         self._uid: int | None = None
         self._lock = threading.Lock()
+        self._credential_ok, self._credential_refusal = False, None
 
     # --- transport -------------------------------------------------------
     def _proxy(self, path: str) -> xmlrpc.client.ServerProxy:
@@ -156,21 +158,51 @@ class OdooClient:
             else _TimeoutSafeTransport(self._timeout)
         return xmlrpc.client.ServerProxy(f"{self._url}/xmlrpc/2/{path}", transport=transport, allow_none=True)
 
+    def _execute(self, model: str, method: str, args: list, kwargs: dict):
+        """Raw XML-RPC. Only _transport_call (method-checked) and the credential probe may reach this."""
+        with self._lock:
+            if self._uid is None:
+                uid = self._proxy("common").authenticate(self._db, self._login, self._key, {})
+                if not uid:
+                    raise OdooError("Odoo authentication failed")
+                self._uid = uid
+        # New proxy per call: xmlrpc Transport reuses one connection and is not thread-safe.
+        return self._proxy("object").execute_kw(self._db, self._uid, self._key, model, method, args, kwargs)
+
     def _transport_call(self, model: str, method: str, args: list, kwargs: dict):
-        """Single choke point to Odoo. Only reached via call() after validation."""
+        """Single choke point to Odoo. Independent of call(): refuses any method that is not a read."""
+        if method not in READ_METHODS:  # second, separate write guard: nothing else can leave this process
+            raise ReadOnlyViolation(f"Method not allowed at transport: {method}")
         try:
-            with self._lock:
-                if self._uid is None:
-                    uid = self._proxy("common").authenticate(self._db, self._login, self._key, {})
-                    if not uid:
-                        raise OdooError("Odoo authentication failed")
-                    self._uid = uid
-            # New proxy per call: xmlrpc Transport reuses one connection and is not thread-safe.
-            return self._proxy("object").execute_kw(self._db, self._uid, self._key, model, method, args, kwargs)
-        except OdooError:
+            self._ensure_read_only_credential()
+            return self._execute(model, method, args, kwargs)
+        except (OdooError, ReadOnlyViolation):
             raise
         except Exception as exc:  # never include exc text: it may echo payloads
             raise OdooError(f"Odoo request failed ({type(exc).__name__})") from None
+
+    def _ensure_read_only_credential(self) -> None:
+        """Refuse to serve if the Odoo user itself can write, unless ODOO_ALLOW_WRITABLE_USER=1 acknowledges it.
+
+        Uses Odoo's check_access_rights (a permission query, it changes nothing). The server cannot write
+        either way; this stops a powerful credential being used by accident.
+        """
+        if self._credential_ok:
+            return
+        if self._credential_refusal:
+            raise OdooError(self._credential_refusal)
+        if os.environ.get("ODOO_ALLOW_WRITABLE_USER") == "1":
+            self._credential_ok = True
+            return
+        writable = [m for m in MODELS
+                    if self._execute(m, "check_access_rights", ["write"], {"raise_exception": False})]
+        if writable:
+            self._credential_refusal = (
+                f"Refusing to run: the Odoo user can write to {len(writable)} of {len(MODELS)} models "
+                f"(e.g. {writable[0]}). Use a read-only Odoo user, or set ODOO_ALLOW_WRITABLE_USER=1 to "
+                "acknowledge. This server never writes either way.")
+            raise OdooError(self._credential_refusal)
+        self._credential_ok = True
 
     # --- guarded gate ----------------------------------------------------
     def call(self, model: str, method: str, args=(), kwargs=None, company_id: int | None = None):
