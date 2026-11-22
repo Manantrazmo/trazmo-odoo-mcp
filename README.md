@@ -33,6 +33,26 @@ PYTHONPATH=src .venv/bin/python -m trazmo_odoo_mcp &
 npx @modelcontextprotocol/inspector --cli http://localhost:18765/mcp --transport http --method tools/list --header "Authorization: Bearer $MCP_BEARER_TOKEN"
 ```
 
+## Run locally (this Mac only; nothing is exposed online)
+1. Create the dedicated read-only Odoo user and an API key. Store the key in the Keychain (you type it at the prompt; it is not echoed):
+```bash
+security add-generic-password -U -s trazmo-odoo-mcp -a odoo-api-key -w
+```
+2. Start the server (binds 127.0.0.1 only). The first run creates a `local` login whose token goes into the Keychain; logins live in `~/.config/trazmo-odoo-mcp/principals.json` (hashes only, outside the repo):
+```bash
+ODOO_LOGIN=<readonly-user-login> scripts/run_local.sh
+```
+3. In a second terminal, test every tool for all three companies against your real Odoo:
+```bash
+.venv/bin/python scripts/local_check.py
+```
+A `FAIL ... Odoo request failed (Fault)` line means a field or model name differs in your Odoo version.
+4. Connect Claude Code (the token is copied from the Keychain; Claude Code stores the header in its own config):
+```bash
+claude mcp add --transport http trazmo-odoo http://127.0.0.1:8765/mcp --header "Authorization: Bearer $(security find-generic-password -s trazmo-odoo-mcp -a local-token -w)"
+```
+claude.ai custom connectors are called from Anthropic's cloud, so they cannot reach `127.0.0.1`; use Claude Code / the desktop app with a local server, or deploy (below). Directors on other machines also cannot reach a local server.
+
 ## Deploy
 1. In Odoo create the dedicated read-only user and an API key for it.
 2. Store the key without echoing it, then run the deploy script:

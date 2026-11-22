@@ -4,7 +4,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY src/ ./src/
-ENV PYTHONPATH=/app/src
+ENV PYTHONPATH=/app/src HOST=0.0.0.0
 RUN useradd -r -u 10001 app
 USER app
 # Cloud Run sets $PORT (default 8080)
