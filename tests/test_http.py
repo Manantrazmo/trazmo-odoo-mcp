@@ -139,3 +139,9 @@ def test_websocket_scope_fails_closed():
     g = GuardMiddleware(inner, P(FULL), 60)
     asyncio.run(g({"type": "websocket", "path": "/mcp", "headers": []}, None, None))
     assert called == []
+
+
+def test_every_tool_is_marked_read_only(web):
+    tools = web.post("/mcp", json=LIST, headers=auth()).json()["result"]["tools"]
+    assert tools and all(t["annotations"]["readOnlyHint"] is True and t["annotations"]["destructiveHint"] is False
+                         for t in tools)
