@@ -53,6 +53,17 @@ claude mcp add --transport http trazmo-odoo http://127.0.0.1:8765/mcp --header "
 ```
 claude.ai custom connectors are called from Anthropic's cloud, so they cannot reach `127.0.0.1`; use Claude Code / the desktop app with a local server, or deploy (below). Directors on other machines also cannot reach a local server.
 
+### On-demand (recommended locally): stdio
+The client starts the server only when a session uses it and it exits with the session, so nothing runs in the background and no port or token is involved. Needs the Keychain key and the logins file (run `scripts/run_local.sh` once to create it).
+```bash
+claude mcp add trazmo-odoo -e ODOO_LOGIN=<login> -- "$(pwd)/scripts/run_stdio.sh"
+```
+Claude Desktop: add to `claude_desktop_config.json`:
+```json
+{"mcpServers": {"trazmo-odoo": {"command": "/absolute/path/to/scripts/run_stdio.sh", "env": {"ODOO_LOGIN": "<login>"}}}}
+```
+The stdio server uses the `local` login (override with `MCP_STDIO_PRINCIPAL`). Audit lines go to stderr.
+
 ## Deploy
 1. In Odoo create the dedicated read-only user and an API key for it.
 2. Store the key without echoing it, then run the deploy script:

@@ -4,6 +4,8 @@ import sys
 import time
 from contextvars import ContextVar
 
+stream = None  # None => sys.stdout; stdio mode sets stderr (stdout is the protocol channel)
+
 # Mutable holder so rows counted in worker threads are visible to the caller.
 _rows: ContextVar[list | None] = ContextVar("rows", default=None)
 
@@ -42,5 +44,6 @@ def audit(tool: str, company_id, rows: int, ok: bool, ms: int, error: str | None
     }
     if error:
         entry["error_type"] = error  # exception class name only
-    sys.stdout.write(json.dumps(entry) + "\n")
-    sys.stdout.flush()
+    out = stream or sys.stdout
+    out.write(json.dumps(entry) + "\n")
+    out.flush()
