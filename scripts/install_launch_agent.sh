@@ -3,17 +3,31 @@
 # Install:   ODOO_LOGIN=<login> [ODOO_ALLOW_WRITABLE_USER=1] [PORT=8777] scripts/install_launch_agent.sh
 # Remove:    scripts/uninstall_launch_agent.sh
 # Secrets are NOT written to the plist: the Odoo key and the local token are read from the Keychain at start-up.
+# The code is copied to ~/.local/share/trazmo-odoo-mcp and run from there: macOS blocks background jobs from
+# running scripts inside protected folders such as Downloads, Documents and Desktop. Re-run this script to update.
 # DRY_RUN=1 writes and lints the plist in /tmp without installing anything.
 set -euo pipefail
 LABEL=com.trazmo.odoo-mcp
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 : "${ODOO_LOGIN:?Set ODOO_LOGIN to the login of the Odoo user}"
 PORT="${PORT:-8777}"
+APP="$HOME/.local/share/trazmo-odoo-mcp"
 LOG="$HOME/Library/Logs/trazmo-odoo-mcp.log"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"; [ "${DRY_RUN:-}" = 1 ] && PLIST="/tmp/$LABEL.plist"
 mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+if [ "${DRY_RUN:-}" != 1 ]; then
+  mkdir -p "$APP/scripts"
+  rm -rf "$APP/src"; cp -R "$ROOT/src" "$APP/src"
+  cp "$ROOT/scripts/run_local.sh" "$APP/scripts/run_local.sh"; cp "$ROOT/requirements.txt" "$APP/requirements.txt"
+  if [ ! -x "$APP/.venv/bin/python" ]; then
+    if command -v uv >/dev/null; then uv venv --python 3.12 "$APP/.venv" -q
+    else "$(command -v python3.12 || command -v python3)" -m venv "$APP/.venv"; fi
+  fi
+  if command -v uv >/dev/null; then uv pip install --python "$APP/.venv/bin/python" -q -r "$APP/requirements.txt"
+  else "$APP/.venv/bin/pip" install -q -r "$APP/requirements.txt"; fi
+fi
 
-ROOT="$ROOT" LABEL="$LABEL" LOG="$LOG" PLIST="$PLIST" PORT="$PORT" ODOO_LOGIN="$ODOO_LOGIN" \
+ROOT="$APP" LABEL="$LABEL" LOG="$LOG" PLIST="$PLIST" PORT="$PORT" ODOO_LOGIN="$ODOO_LOGIN" \
 ALLOW="${ODOO_ALLOW_WRITABLE_USER:-}" python3 "$ROOT/scripts/_write_launch_plist.py"
 chmod 600 "$PLIST"; plutil -lint "$PLIST"
 if [ "${DRY_RUN:-}" = 1 ]; then echo "dry run: $PLIST written and valid (nothing installed)"; exit 0; fi
