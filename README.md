@@ -68,6 +68,9 @@ Claude Desktop: add to `claude_desktop_config.json`:
 ```
 The stdio server uses the `local` login (override with `MCP_STDIO_PRINCIPAL`). Audit lines go to stderr.
 
+### Start automatically at login (macOS)
+`ODOO_LOGIN=<login> scripts/install_launch_agent.sh` installs a launch agent (add `ODOO_ALLOW_WRITABLE_USER=1` only for an admin key you acknowledge). It starts at login and restarts if it stops; secrets are read from the Keychain, not stored in the plist. Remove with `scripts/uninstall_launch_agent.sh`. Log: `~/Library/Logs/trazmo-odoo-mcp.log`.
+
 ## Deploy
 1. In Odoo create the dedicated read-only user and an API key for it.
 2. Store the key without echoing it, then run the deploy script:
