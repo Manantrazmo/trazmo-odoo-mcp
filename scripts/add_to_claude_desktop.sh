@@ -6,7 +6,7 @@ set -euo pipefail
 : "${ODOO_LOGIN:?Set ODOO_LOGIN to the login of the Odoo user}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CFG="${CLAUDE_DESKTOP_CONFIG:-$HOME/Library/Application Support/Claude/claude_desktop_config.json}"
-if [ -z "${CLAUDE_DESKTOP_CONFIG:-}" ] && pgrep -x Claude >/dev/null; then
+if [ -z "${CLAUDE_DESKTOP_CONFIG:-}" ] && ps -axo command | grep -q "[C]laude.app/Contents/MacOS/Claude$"; then
   echo "Claude is still running. Quit it fully (Cmd+Q), then run this again." >&2; exit 1
 fi
 cp "$CFG" "$CFG.bak-$(date +%Y%m%d-%H%M%S)"
