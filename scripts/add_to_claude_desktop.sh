@@ -10,4 +10,6 @@ if [ -z "${CLAUDE_DESKTOP_CONFIG:-}" ] && ps -axo command | grep -q "[C]laude.ap
   echo "Claude is still running. Quit it fully (Cmd+Q), then run this again." >&2; exit 1
 fi
 cp "$CFG" "$CFG.bak-$(date +%Y%m%d-%H%M%S)"
-CFG="$CFG" ROOT="$ROOT" LOGIN="$ODOO_LOGIN" ALLOW="${ODOO_ALLOW_WRITABLE_USER:-}" python3 "$ROOT/scripts/_add_desktop_entry.py"
+# Desktop may not run files in Downloads, so it launches the copy under ~/.local/share.
+[ -n "${CLAUDE_DESKTOP_CONFIG:-}" ] || "$ROOT/scripts/install_local_copy.sh"
+CFG="$CFG" ROOT="$HOME/.local/share/trazmo-odoo-mcp" LOGIN="$ODOO_LOGIN" ALLOW="${ODOO_ALLOW_WRITABLE_USER:-}" python3 "$ROOT/scripts/_add_desktop_entry.py"

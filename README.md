@@ -62,6 +62,7 @@ The client starts the server only when a session uses it and it exits with the s
 ```bash
 claude mcp add trazmo-odoo -e ODOO_LOGIN=<login> -- "$(pwd)/scripts/run_stdio.sh"
 ```
+If the project is inside Downloads, Documents or Desktop, apps cannot run files there. Quit Claude, then run `ODOO_LOGIN=<login> scripts/add_to_claude_desktop.sh`, which copies the server to `~/.local/share/trazmo-odoo-mcp` and points Desktop at it.
 Claude Desktop: add to `claude_desktop_config.json`:
 ```json
 {"mcpServers": {"trazmo-odoo": {"command": "/absolute/path/to/scripts/run_stdio.sh", "env": {"ODOO_LOGIN": "<login>"}}}}
